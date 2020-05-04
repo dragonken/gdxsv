@@ -1,0 +1,118 @@
+.main {
+    font-size: 100%;
+}
+
+.jumbotron-ex {
+    position: relative;
+    height: 50vh;
+    min-height: 300px;
+    background: url(../img/title.png) no-repeat center center;
+    background-size: cover;
+    text-shadow: 1px 1px 2px whitesmoke, 0 0 25px whitesmoke, 0 0 5px whitesmoke;
+}
+
+.jumbotron-container {
+    position: relative;
+    top: 50%;
+    transform: translateY(-50%);
+}
+
+.title {
+    text-align: left;
+    font-family: 'Anton', sans-serif;
+    padding-top: 10%;
+    padding-left: 10%;
+    font-size: 8vh;
+    color: black;
+    background-color: transparent;
+}
+
+.title-sub {
+    text-align: left;
+    font-family: 'M PLUS 1p', sans-serif;
+    padding-left: 3%;
+    font-size: 2.5vh;
+    color: black;
+    background-color: transparent;
+}
+
+body {
+    font-family: 'M PLUS 1p', sans-serif;
+    background-color: whitesmoke;
+    margin-bottom: 20px;
+}
+
+.main-contents {
+    padding-top: 12px;
+    margin-top: 0px;
+    font-size: 2.5vh;
+    color: black;
+}
+
+h2, h3, h4, h5, h6 {
+    font-weight: bolder;
+    text-align: center;
+    color: whitesmoke;
+    background-color: gray;
+    border-top : solid 2px black;
+    border-bottom: solid 2px black;
+}
+
+h2 {
+    font-size: 1.5em;
+}
+
+h3 {
+    font-size: 1em;
+}
+
+p {
+    padding-left: 10px;
+}
+
+.panel {
+    background-color: whitesmoke;
+}
+
+.panel > .panel-heading {
+    text-align: center;
+    background-color: gray;
+    color: whitesmoke;
+    border-top : solid 2px black;
+    border-bottom: solid 2px black;
+}
+
+.danger {
+    color: #FF9999;
+}
+
+.z-user-id {
+    color: gold;
+    font-family: "monospace sans-serif";
+}
+
+.z-user-name {
+    color: darkorange;
+}
+
+.links-wrapper {
+    width: 100%;
+    background-color: #333333;
+}
+
+div.links > a {
+    background-color: #333333;
+    color: skyblue;
+    border: none;
+}
+
+.mini-font {
+    font-size: 80%;
+}
+
+.mini-table > tbody > tr > td {
+    margin: 0 0;
+    padding-top: 0px;
+    padding-bottom: 5px;
+    border: none;
+}

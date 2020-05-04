@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ja">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <meta name="description" content="機動戦士ガンダム 連邦vs.ジオン&DX の非公式通信対サーバーです。">
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/css/bootstrap.min.css"
+          integrity="sha384-Vkoo8x4CGsO3+Hhxv8T/Q5PaXtkKtu6ug5TOeNV6gBiFeWPGFN9MuhOf23Q9Ifjh" crossorigin="anonymous">
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Anton&family=M+PLUS+1p:wght@700&display=swap" rel="stylesheet">
+    <title>連邦vs.ジオン&DX 非公式通信対戦サーバー</title>
+</head>
+
+<body>
+<main>
+    <div class="jumbotron-fluid jumbotron-ex">
+        <div class="container-fluid jumbotron-container">
+            <h1 class="title">gdxsv</h1>
+            <p class="title-sub">連邦vs.ジオン&DX 非公式通信対戦サーバー</p>
+        </div>
+    </div>
+
+    <div class="container main-contents">
+        <div class="row">
+            <div class="col-sm-8">
+                <h2>新着情報</h2>
+                <p>
+                    20年の時を経て, 連ジの通信対戦が復活!?<br>
+                    君は生き延びることができるか..?
+                </p>
+                <ul>
+                    <li>2020/05/10 オープンβを開始</li>
+                </ul>
+
+                <h2>接続方法</h2>
+                <h3>必要なもの</h3>
+                <ul>
+                    <li>ドリームキャスト版 連邦vs.ジオン&DX ゲームイメージ</li>
+                    <li>ドリームキャストエミュレータが快適に動作する Windows PC</li>
+                </ul>
+            </div>  <!-- end of col  -->
+
+            <div class="col-sm-4">
+                <div class="container">
+                    <div class="panel">
+                        <div class="panel-heading">接続情報</div>
+                        <div class="panel-body">
+                            <p id="stat-updated">取得中</p>
+                            <p id="lobby-user-count"></p>
+                            <table class="table mini-font mini-table table-inverse" id="lobby-users-table"></table>
+                            <p id="battle-user-count"></p>
+                            <table class="table mini-font mini-table table-inverse" id="battle-users-table"></table>
+                        </div>
+                    </div>  <!-- end of panel -->
+
+                    <div class="panel">
+                        <iframe src="https://discordapp.com/widget?id=700419199633195069&theme=dark" width="100%"
+                                height="500" allowtransparency="true" frameborder="0"></iframe>
+                    </div>  <!-- end of panel -->
+                </div>
+            </div>  <!-- end of col  -->
+
+        </div>  <!-- end of row -->
+    </div>
+</main>
+
+<script src="https://code.jquery.com/jquery-3.4.1.slim.min.js"
+        integrity="sha384-J6qa4849blE2+poT4WnyKhv5vZF5SrPo0iEjwBvKU7imGFAV0wwj1yYfoRSJoZ+n"
+        crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.0/dist/umd/popper.min.js"
+        integrity="sha384-Q6E9RHvbIyZFJoft+2mJbHaEWldlvI9IOYy5n3zV9zzTtmI3UksdQRVvoxMfooAo"
+        crossorigin="anonymous"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.4.1/js/bootstrap.min.js"
+        integrity="sha384-wfSDF2E50Y2D1uUdj0O3uMBJnjuUD4Ih7YwaYd1iqfktj0Uod8GCExl3Og8ifwB6"
+        crossorigin="anonymous"></script>
+
+<script>
+    $(function () {
+// cf. https://codegena.com/auto-embed-latest-video-youtube-channel
+        var reqURL = "https://api.rss2json.com/v1/api.json?rss_url=" + encodeURIComponent("https://www.youtube.com/feeds/videos.xml?channel_id=");
+
+        function loadVideo(iframe) {
+            $.getJSON(reqURL + iframe.getAttribute('cid'), function (data) {
+                    var videoNumber = (iframe.getAttribute('vnum') ? Number(iframe.getAttribute('vnum')) : 0);
+                    console.log(videoNumber);
+                    var link = data.items[videoNumber].link;
+                    var id = link.substr(link.indexOf("=") + 1);
+                    iframe.setAttribute("src", "https://youtube.com/embed/" + id + "?controls=1&autoplay=0");
+                }
+            );
+        }
+
+        var iframes = document.getElementsByClassName('latestVideoEmbed');
+        for (var i = 0, len = iframes.length; i < len; i++) {
+            loadVideo(iframes[i]);
+        }
+
+        function updateOnlineUser(t, u) {
+            while (0 < t.rows.length) t.deleteRow(-1)
+            if (!u) return
+            u.sort(function (a, b) {
+                if (a.UserID < b.UserID) return -1;
+                if (a.UserID > b.UserID) return 1;
+                return 0;
+            })
+            for (var i = 0; i < u.length; i++) {
+                var r = t.insertRow(-1);
+                var uid = r.insertCell(0)
+                uid.innerHTML = "【" + u[i].UserID + "】"
+                uid.className = "z-user-id"
+                var uname = r.insertCell(1)
+                uname.innerHTML = u[i].Name
+                uname.className = "z-user-name"
+                r.insertCell(2).innerHTML = u[i].UDP ? '<span class="label label-primary">UDP</span>' : ""
+            }
+        }
+
+        function pollStat() {
+            $.ajax({url: '/api/stat', type: 'GET', dataType: 'json'}).done(function (res) {
+                document.getElementById("stat-updated").innerHTML = res.NowDate + "現在"
+                document.getElementById("lobby-user-count").innerHTML = "ロビー " + res.LobbyUsers.length + " 人"
+                document.getElementById("battle-user-count").innerHTML = "対戦中 " + res.BattleUsers.length + " 人"
+                updateOnlineUser(document.getElementById("lobby-users-table"), res.LobbyUsers)
+                updateOnlineUser(document.getElementById("battle-users-table"), res.BattleUsers)
+            });
+        }
+
+        pollStat();
+        setInterval(pollStat, 30 * 1000);
+    })
+</script>
+</body>
+</html>
