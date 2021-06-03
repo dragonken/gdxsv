@@ -83,7 +83,7 @@ func (lbs *Lbs) RegisterHTTPHandlers() {
 				resp.BattleUsers = append(resp.BattleUsers, &onlineUser{
 					UserID:     u.UserID,
 					Name:       u.Name,
-					Team:       teamName(int(u.Side)),
+					Team:       teamName(int(u.Team)),
 					BattleCode: u.BattleCode,
 					Platform:   u.Platform,
 					Disk:       disk,
@@ -109,5 +109,14 @@ func (lbs *Lbs) RegisterHTTPHandlers() {
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
+	})
+
+	http.HandleFunc("/ops/reload", func(w http.ResponseWriter, r *http.Request) {
+		lbs.Locked(func(lbs *Lbs) {
+			lbs.reload = true
+		})
+		w.WriteHeader(http.StatusOK)
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte("OK"))
 	})
 }

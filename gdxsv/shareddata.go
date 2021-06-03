@@ -43,7 +43,7 @@ type McsUser struct {
 	BattleCount int    `json:"battle_count,omitempty"`
 	WinCount    int    `json:"win_count,omitempty"`
 	LoseCount   int    `json:"lose_count,omitempty"`
-	Side        uint16 `json:"side,omitempty"`
+	Team        uint16 `json:"team,omitempty"`
 	SessionID   string `json:"session_id,omitempty"`
 
 	State       int       `json:"state,omitempty"`
@@ -55,7 +55,7 @@ type McsGame struct {
 	BattleCode string `json:"battle_code,omitempty"`
 	McsAddr    string `json:"mcs_addr,omitempty"`
 	GameDisk   string `json:"game_disk"`
-	Rule       Rule   `json:"rule,omitempty"`
+	Rule       Rule  `json:"rule,omitempty"`
 
 	State     int       `json:"state,omitempty"`
 	UpdatedAt time.Time `json:"updated_at,omitempty"`

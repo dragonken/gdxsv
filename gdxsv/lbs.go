@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"go.uber.org/zap"
@@ -46,6 +47,7 @@ type Lbs struct {
 	chQuit    chan interface{}
 
 	noban      bool
+	reload     bool
 	banChecked map[string]bool
 	bannedIPs  map[string]time.Time
 }
@@ -81,10 +83,42 @@ func (lbs *Lbs) NoBan() {
 	lbs.noban = true
 }
 
+func (lbs *Lbs) IsBannedEndpoint(p *LbsPeer) bool {
+	banned, err := getDB().IsBannedEndpoint(p.IP(), p.PlatformInfo["machine_id"])
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		logger.Warn("GetBan returned err", zap.Error(err))
+		return false
+	}
+	if banned && lbs.noban {
+		logger.Warn("passed banned user", zap.String("ip", p.IP()), zap.String("machine_id", p.PlatformInfo["machine_id"]))
+		return false
+	}
+	return banned
+}
+
+func (lbs *Lbs) IsBannedAccount(loginKey string) bool {
+	banned, err := getDB().IsBannedAccount(loginKey)
+	if err == sql.ErrNoRows {
+		return false
+	}
+	if err != nil {
+		logger.Warn("IsBannedAccount returned err", zap.Error(err))
+		return false
+	}
+	if banned && lbs.noban {
+		logger.Warn("passed banned user", zap.String("login_key", loginKey))
+		return false
+	}
+	return banned
+}
+
 func (lbs *Lbs) IsTempBan(p *LbsPeer) bool {
 	if t, ok := p.app.bannedIPs[p.IP()]; ok && time.Since(t).Minutes() <= 10 {
 		if lbs.noban {
-			logger.Warn("passed banned user", zap.String("user_id", p.UserID))
+			logger.Warn("passed temp banned user", zap.String("user_id", p.UserID), zap.String("name", p.Name))
 			return false
 		}
 		return true
@@ -394,6 +428,9 @@ func (lbs *Lbs) eventLoop() {
 
 			for _, pfLobbies := range lbs.lobbies {
 				for _, lobby := range pfLobbies {
+					if lbs.reload {
+						lobby.LoadLobbySetting()
+					}
 					lobby.Update()
 				}
 			}
@@ -434,7 +471,7 @@ func (lbs *Lbs) BroadcastLobbyUserCount(lobby *LbsLobby) {
 
 	// To lobby scene.
 	if lobby.GameDisk == GameDiskPS2 {
-		renpo, zeon := lobby.GetUserCountBySide()
+		renpo, zeon := lobby.GetUserCountByTeam()
 		msgSum1 := NewServerNotice(lbsLobbyJoin).Writer().Write16(TeamRenpo).Write16(renpo + zeon).Msg()
 		msgSum2 := NewServerNotice(lbsLobbyJoin).Writer().Write16(TeamZeon).Write16(renpo + zeon).Msg()
 		msgRenpo := NewServerNotice(lbsLobbyJoin).Writer().Write16(TeamRenpo).Write16(renpo).Msg()
@@ -457,8 +494,8 @@ func (lbs *Lbs) BroadcastLobbyUserCount(lobby *LbsLobby) {
 			return
 		}
 
-		renpo1, zeon1 := lobby1.GetUserCountBySide()
-		renpo2, zeon2 := lobby2.GetUserCountBySide()
+		renpo1, zeon1 := lobby1.GetUserCountByTeam()
+		renpo2, zeon2 := lobby2.GetUserCountByTeam()
 		msgSum1 := NewServerNotice(lbsLobbyJoin).Writer().
 			Write16(TeamRenpo).
 			Write16(renpo1 + zeon1).

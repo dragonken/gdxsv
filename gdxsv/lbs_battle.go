@@ -58,7 +58,7 @@ func NewBattle(app *Lbs, lobbyID uint16, rule *Rule, mcsRegion string, mcsAddr s
 	}
 
 	if rule == nil {
-		rule = RulePresetDefault.Clone()
+		rule = &DefaultRule
 	}
 
 	return &LbsBattle{
@@ -140,7 +140,7 @@ func (b *LbsBattle) GetUserRankByPos(pos byte) int {
 	return b.UserRanks[pos]
 }
 
-func (b *LbsBattle) GetUserSide(userID string) uint16 {
+func (b *LbsBattle) GetUserTeam(userID string) uint16 {
 	for _, id := range b.RenpoIDs {
 		if id == userID {
 			return 1

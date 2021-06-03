@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -122,8 +123,8 @@ const (
 	lbsPlazaEntry         CmdID = 0x6207 // Select a lobby
 	lbsPlazaExit          CmdID = 0x6306 // Exit a lobby
 	lbsLobbyJoin          CmdID = 0x6303 //
-	lbsLobbyEntry         CmdID = 0x6305 // Select join side and enter lobby chat scene
-	lbsLobbyExit          CmdID = 0x6408 // Exit lobby chat and enter join side select scene
+	lbsLobbyEntry         CmdID = 0x6305 // Select team and enter lobby chat scene
+	lbsLobbyExit          CmdID = 0x6408 // Exit lobby chat and enter join team select scene
 	lbsLobbyMatchingJoin  CmdID = 0x640F
 	lbsRoomMax            CmdID = 0x6401
 	lbsRoomTitle          CmdID = 0x6402
@@ -265,7 +266,52 @@ var _ = register(lbsLoginType, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
+	if p.app.IsBannedEndpoint(p) {
+		p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+			WriteString("<LF=5><BODY><CENTER>YOU ARE BANNED<END>").Msg())
+		return
+	}
+
 	switch loginType {
+	case 0:
+		if p.PlatformInfo["flycast"] != "" {
+			if semver.Compare(p.PlatformInfo["flycast"], requiredFlycastVersion) < 0 {
+				p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+					WriteString("<LF=5><BODY><CENTER>PLEASE UPDATE Flycast<END>").Msg())
+				return
+			}
+		}
+		if p.LoginKey != "" {
+			// Check login key is banned
+			if p.app.IsBannedAccount(p.LoginKey) {
+				p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+					WriteString("<LF=5><BODY><CENTER>YOU ARE BANNED<END>").Msg())
+				return
+			}
+
+			// Get account by pre-sent loginkey
+			account, err := getDB().GetAccountByLoginKey(p.LoginKey)
+			if err != nil {
+				p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+					WriteString("<LF=5><BODY><CENTER>FAILED TO GET ACCOUNT INFO<END>").Msg())
+				return
+			}
+
+			// Update session_id that was generated when the first request.
+			err = getDB().LoginAccount(account, p.SessionID, p.IP(), p.PlatformInfo["machine_id"])
+			if err != nil {
+				logger.Error("failed to login account", zap.Error(err))
+				p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+					WriteString("<LF=5><BODY><CENTER>FAILED TO LOGIN<END>").Msg())
+				return
+			}
+			sendUserList(p)
+			return
+		}
+
+		p.logger.Info("unsupported login type", zap.Any("login_type", loginType))
+		p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+			WriteString("<LF=5><BODY><CENTER>UNSUPPORTED LOGIN TYPE<END>").Msg())
 	case 2:
 		if p.PlatformInfo["flycast"] != "" {
 			if semver.Compare(p.PlatformInfo["flycast"], requiredFlycastVersion) < 0 {
@@ -293,7 +339,7 @@ var _ = register(lbsLoginType, func(p *LbsPeer, m *LbsMessage) {
 		}
 
 		// Update session_id that was generated when the first request.
-		err = getDB().LoginAccount(account, p.SessionID, p.IP())
+		err = getDB().LoginAccount(account, p.SessionID, p.IP(), p.PlatformInfo["machine_id"])
 		if err != nil {
 			p.SendMessage(NewServerNotice(lbsShutDown).Writer().
 				WriteString("<LF=5><BODY><CENTER>FAILED TO LOGIN<END>").Msg())
@@ -321,12 +367,26 @@ var _ = register(lbsUserInfo1, func(p *LbsPeer, m *LbsMessage) {
 	hasher.Write(m.Reader().ReadBytes())
 	loginKey := hex.EncodeToString(hasher.Sum(nil))
 
+	if p.app.IsBannedAccount(loginKey) {
+		p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+			WriteString("<LF=5><BODY><CENTER>YOU ARE BANNED<END>").Msg())
+		return
+	}
+
 	// If the user already have an account, get it.
 	account, err := getDB().GetAccountByLoginKey(loginKey)
 	if err != nil {
-		account, err = getDB().RegisterAccountWithLoginKey(p.IP(), loginKey)
-		if err != nil {
-			p.logger.Error("failed to create account", zap.Error(err))
+		switch err {
+		case sql.ErrNoRows:
+			account, err = getDB().RegisterAccountWithLoginKey(p.IP(), loginKey)
+			if err != nil {
+				p.logger.Error("failed to create account", zap.Error(err))
+				p.SendMessage(NewServerNotice(lbsShutDown).Writer().
+					WriteString("<LF=5><BODY><CENTER>FAILED TO GET ACCOUNT INFO<END>").Msg())
+				return
+			}
+		default:
+			p.logger.Error("failed to get account", zap.Error(err))
 			p.SendMessage(NewServerNotice(lbsShutDown).Writer().
 				WriteString("<LF=5><BODY><CENTER>FAILED TO GET ACCOUNT INFO<END>").Msg())
 			return
@@ -335,7 +395,7 @@ var _ = register(lbsUserInfo1, func(p *LbsPeer, m *LbsMessage) {
 
 	// Now the user has valid account.
 	// Update session_id that was generated when the first request.
-	err = getDB().LoginAccount(account, p.SessionID, p.IP())
+	err = getDB().LoginAccount(account, p.SessionID, p.IP(), p.PlatformInfo["machine_id"])
 	if err != nil {
 		logger.Error("failed to login account", zap.Error(err))
 		p.SendMessage(NewServerNotice(lbsShutDown).Writer().
@@ -343,7 +403,6 @@ var _ = register(lbsUserInfo1, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	// skip 2~8 that's ok.
 	p.SendMessage(NewServerQuestion(lbsUserInfo9))
 })
 
@@ -751,8 +810,8 @@ var _ = register(lbsPlazaStatus, func(p *LbsPeer, m *LbsMessage) {
 	}
 
 	status := 3 // available
-	if lobby.PingLimit && lobby.McsRegion != "" {
-		rtt, err := strconv.Atoi(p.PlatformInfo[lobby.McsRegion])
+	if lobby.LobbySetting.PingLimit && lobby.LobbySetting.McsRegion != "" {
+		rtt, err := strconv.Atoi(p.PlatformInfo[lobby.LobbySetting.McsRegion])
 		if err != nil {
 			rtt = 999
 		}
@@ -774,18 +833,11 @@ var _ = register(lbsPlazaExplain, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	rtt, ok := p.PlatformInfo[lobby.McsRegion]
-	if ok {
-		p.SendMessage(NewServerAnswer(m).Writer().
-			Write16(lobbyID).
-			WriteString(fmt.Sprintf("<B>[%vms]<B>%s", rtt, lobby.Description)).
-			Msg())
-	} else {
-		p.SendMessage(NewServerAnswer(m).Writer().
-			Write16(lobbyID).
-			WriteString(lobby.Description).
-			Msg())
-	}
+	rtt := p.PlatformInfo[lobby.LobbySetting.McsRegion]
+	p.SendMessage(NewServerAnswer(m).Writer().
+		Write16(lobbyID).
+		WriteString(lobby.buildDescription(rtt)).
+		Msg())
 })
 
 var _ = register(lbsPlazaEntry, func(p *LbsPeer, m *LbsMessage) {
@@ -826,8 +878,8 @@ var _ = register(lbsLobbyEntry, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	side := m.Reader().Read16()
-	p.Team = side
+	team := m.Reader().Read16()
+	p.Team = team
 	p.SendMessage(NewServerAnswer(m))
 	p.app.BroadcastLobbyUserCount(p.Lobby)
 	p.Lobby.SwitchTeam(p)
@@ -839,7 +891,7 @@ var _ = register(lbsLobbyExit, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	// LobbyExit means go back to side select scene.
+	// LobbyExit means go back to team select scene.
 	// So don't remove Lobby ref here.
 
 	p.Team = TeamNone
@@ -855,20 +907,20 @@ var _ = register(lbsLobbyJoin, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	side := m.Reader().Read16()
+	team := m.Reader().Read16()
 	switch p.Lobby.GameDisk {
 	case GameDiskPS2:
-		renpo, zeon := p.Lobby.GetUserCountBySide()
+		renpo, zeon := p.Lobby.GetUserCountByTeam()
 		if p.InLobbyChat() {
 			p.SendMessage(NewServerAnswer(m).Writer().
-				Write16(side).Write16(renpo + zeon).Msg())
+				Write16(team).Write16(renpo + zeon).Msg())
 		} else {
-			if side == 1 {
+			if team == 1 {
 				p.SendMessage(NewServerAnswer(m).Writer().
-					Write16(side).Write16(renpo).Msg())
+					Write16(team).Write16(renpo).Msg())
 			} else {
 				p.SendMessage(NewServerAnswer(m).Writer().
-					Write16(side).Write16(zeon).Msg())
+					Write16(team).Write16(zeon).Msg())
 			}
 		}
 	case GameDiskDC1, GameDiskDC2:
@@ -879,22 +931,22 @@ var _ = register(lbsLobbyJoin, func(p *LbsPeer, m *LbsMessage) {
 			return
 		}
 
-		renpo1, zeon1 := lobby1.GetUserCountBySide()
-		renpo2, zeon2 := lobby2.GetUserCountBySide()
+		renpo1, zeon1 := lobby1.GetUserCountByTeam()
+		renpo2, zeon2 := lobby2.GetUserCountByTeam()
 		if p.InLobbyChat() {
 			p.SendMessage(NewServerAnswer(m).Writer().
-				Write16(side).
+				Write16(team).
 				Write16(renpo1 + zeon1).
 				Write16(renpo2 + zeon2).Msg())
 		} else {
-			if side == 1 {
+			if team == 1 {
 				p.SendMessage(NewServerAnswer(m).Writer().
-					Write16(side).
+					Write16(team).
 					Write16(renpo1).
 					Write16(renpo2).Msg())
 			} else {
 				p.SendMessage(NewServerAnswer(m).Writer().
-					Write16(side).
+					Write16(team).
 					Write16(zeon1).
 					Write16(zeon2).Msg())
 			}
@@ -908,14 +960,14 @@ var _ = register(lbsLobbyMatchingJoin, func(p *LbsPeer, m *LbsMessage) {
 		return
 	}
 
-	side := m.Reader().Read16()
+	team := m.Reader().Read16()
 	renpo, zeon := p.Lobby.GetLobbyMatchEntryUserCount()
-	if side == 1 {
+	if team == 1 {
 		p.SendMessage(NewServerAnswer(m).Writer().
-			Write16(side).Write16(renpo).Msg())
+			Write16(team).Write16(renpo).Msg())
 	} else {
 		p.SendMessage(NewServerAnswer(m).Writer().
-			Write16(side).Write16(zeon).Msg())
+			Write16(team).Write16(zeon).Msg())
 	}
 })
 
@@ -1234,20 +1286,19 @@ var _ = register(lbsPostChatMessage, func(p *LbsPeer, m *LbsMessage) {
 	}
 
 	// Additional actions.
-	buildHintMsg := func(hint string) *LbsMessage {
-		return NewServerNotice(lbsChatMessage).Writer().
-			WriteString("").
-			WriteString("").
-			WriteString(hint).
-			Write8(0). // chat_type
-			Write8(0). // id color
-			Write8(0). // handle color
-			Write8(0).Msg() // msg color
-	}
-
 	if text == "／ｆ" || text == "／Ｆ" {
-		//intercept message if it is a command
+		buildHintMsg := func(hint string) *LbsMessage {
+			return NewServerNotice(lbsChatMessage).Writer().
+				WriteString("").
+				WriteString("").
+				WriteString(hint).
+				Write8(0). // chat_type
+				Write8(0). // id color
+				Write8(0). // handle color
+				Write8(0).Msg() // msg color
+		}
 
+		//intercept message if it is a command
 		userHasJoinedForce := false
 		for _, userID := range p.Lobby.EntryUsers {
 			if p.UserID == userID {
@@ -1257,16 +1308,16 @@ var _ = register(lbsPostChatMessage, func(p *LbsPeer, m *LbsMessage) {
 		}
 		twoOrMorePlayers := len(p.Lobby.EntryUsers) >= 2
 
-		if p.Lobby.EnableForceStartCmd && userHasJoinedForce && twoOrMorePlayers {
+		if p.Lobby.LobbySetting.EnableForceStart && userHasJoinedForce && twoOrMorePlayers {
 			// Print induced action to all users (for clarity + educational purpose)
 			p.Lobby.StartForceStartCountDown()
 			p.Lobby.NotifyLobbyEvent("", fmt.Sprintf("%v starts battle countdown!", p.Name))
 		} else {
 			// Print hints to sender
-			if !p.Lobby.EnableForceStartCmd {
+			if !p.Lobby.LobbySetting.EnableForceStart {
 				p.SendMessage(buildHintMsg("/f is disabled in this lobby"))
 			} else if !userHasJoinedForce {
-				p.SendMessage(buildHintMsg("Join a force first! (自動選抜→待機)"))
+				p.SendMessage(buildHintMsg("Join a force first! (自動選抜 -> 待機)"))
 			} else if !twoOrMorePlayers {
 				p.SendMessage(buildHintMsg("Battle requires at least 2 players!"))
 			}
@@ -1392,7 +1443,7 @@ var _ = register(lbsAskPlayerInfo, func(p *LbsPeer, m *LbsMessage) {
 	pos := m.Reader().Read8()
 	u := p.Battle.GetUserByPos(pos)
 	param := p.Battle.GetGameParamByPos(pos)
-	side := p.Battle.GetUserSide(u.UserID)
+	team := p.Battle.GetUserTeam(u.UserID)
 	grade := decideGrade(u.WinCount, p.Battle.GetUserRankByPos(pos))
 	msg := NewServerAnswer(m).Writer().
 		Write8(pos).
@@ -1405,7 +1456,7 @@ var _ = register(lbsAskPlayerInfo, func(p *LbsPeer, m *LbsMessage) {
 		Write16(0). // draw count
 		Write16(r16(u.BattleCount - u.WinCount - u.LoseCount)).
 		Write16(0). // Unknown
-		Write16(side).
+		Write16(team).
 		Write16(0). // Unknown
 		Msg()
 	p.SendMessage(msg)
@@ -1422,7 +1473,7 @@ var _ = register(lbsAskRuleData, func(p *LbsPeer, m *LbsMessage) {
 	// 001e2830: NetHeyaDataSet    overwrite ?
 	a := NewServerAnswer(m)
 	w := a.Writer()
-	bin := p.Battle.Rule.Serialize()
+	bin := SerializeRule(p.Battle.Rule)
 	w.Write16(uint16(len(bin)))
 	w.Write(bin)
 	p.SendMessage(a)
@@ -1500,7 +1551,8 @@ var _ = register(lbsExtSyncSharedData, func(p *LbsPeer, m *LbsMessage) {
 
 var _ = register(lbsPlatformInfo, func(p *LbsPeer, m *LbsMessage) {
 	// patched client sends client-platform information
-	platformInfo := m.Reader().ReadString()
+	r := m.Reader()
+	platformInfo := r.ReadString()
 	for _, line := range strings.Split(strings.TrimSuffix(platformInfo, "\n"), "\n") {
 		kv := strings.SplitN(line, "=", 2)
 		if len(kv) == 2 {
@@ -1513,8 +1565,17 @@ var _ = register(lbsPlatformInfo, func(p *LbsPeer, m *LbsMessage) {
 		zap.String("os", p.PlatformInfo["os"]),
 		zap.String("cpu", p.PlatformInfo["cpu"]),
 	)
-
 	if p.PlatformInfo["cpu"] == "x86/64" {
 		p.Platform = PlatformEmuX8664
+	}
+
+	// pre-sent loginkey
+	if 0 < r.Remaining() {
+		hasher := fnv.New32()
+		hasher.Write(r.ReadBytes())
+		loginKey := hex.EncodeToString(hasher.Sum(nil))
+		if p.LoginKey == "" {
+			p.LoginKey = loginKey
+		}
 	}
 })

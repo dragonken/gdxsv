@@ -27,20 +27,16 @@ func genSessionID() string {
 	return randomString(8, "123456789")
 }
 
-func randInt(min int, max int) int {
-	rand.Seed(time.Now().UTC().UnixNano())
-	return min + rand.Intn(max-min)
-}
-
 type DBAccount struct {
-	LoginKey    string    `db:"login_key" json:"login_key,omitempty"`
-	SessionID   string    `db:"session_id" json:"session_id,omitempty"`
-	LastUserID  string    `db:"last_user_id" json:"last_user_id,omitempty"`
-	Created     time.Time `db:"created" json:"created,omitempty"`
-	CreatedIP   string    `db:"created_ip" json:"created_ip,omitempty"`
-	LastLogin   time.Time `db:"last_login" json:"last_login,omitempty"`
-	LastLoginIP string    `db:"last_login_ip" json:"last_login,omitempty"`
-	System      byte      `db:"system" json:"system,omitempty"`
+	LoginKey           string    `db:"login_key" json:"login_key,omitempty"`
+	SessionID          string    `db:"session_id" json:"session_id,omitempty"`
+	LastUserID         string    `db:"last_user_id" json:"last_user_id,omitempty"`
+	Created            time.Time `db:"created" json:"created,omitempty"`
+	CreatedIP          string    `db:"created_ip" json:"created_ip,omitempty"`
+	LastLogin          time.Time `db:"last_login" json:"last_login,omitempty"`
+	LastLoginIP        string    `db:"last_login_ip" json:"last_login_ip,omitempty"`
+	LastLoginMachineID string    `db:"last_login_machine_id" json:"last_login_machine_id,omitempty"`
+	System             byte      `db:"system" json:"system,omitempty"`
 }
 
 type DBUser struct {
@@ -80,11 +76,12 @@ type BattleRecord struct {
 	UserID     string `db:"user_id" json:"user_id,omitempty"`
 	UserName   string `db:"user_name" json:"user_name,omitempty"`
 	PilotName  string `db:"pilot_name" json:"pilot_name,omitempty"`
+	LobbyID    int    `db:"lobby_id" json:"lobby_id,omitempty"`
 	Players    int    `db:"players" json:"players,omitempty"`
 	Aggregate  int    `db:"aggregate" json:"aggregate,omitempty"`
 
 	Pos    int    `db:"pos" json:"pos,omitempty"`
-	Side   int    `db:"side" json:"side,omitempty"`
+	Team   int    `db:"team" json:"team,omitempty"`
 	Round  int    `db:"round" json:"round,omitempty"`
 	Win    int    `db:"win" json:"win,omitempty"`
 	Lose   int    `db:"lose" json:"lose,omitempty"`
@@ -111,6 +108,52 @@ type RankingRecord struct {
 	DBUser
 }
 
+type UserBan struct {
+	Key     string    `db:"key" json:"key,omitempty"`
+	Until   time.Time `db:"until" json:"until,omitempty"`
+	Created time.Time `db:"created" json:"created,omitempty"`
+}
+
+type MLobbySetting struct {
+	Platform         string `db:"platform" json:"platform"`
+	Disk             string `db:"disk" json:"disk"`
+	No               int    `db:"no" json:"no"`
+	Name             string `db:"name" json:"name"`
+	McsRegion        string `db:"mcs_region" json:"mcs_region"`
+	Comment          string `db:"comment" json:"comment"`
+	RuleID           string `db:"rule_id" json:"rule_id"`
+	EnableForceStart bool   `db:"enable_force_start" json:"enable_force_start"`
+	TeamShuffle      bool   `db:"team_shuffle" json:"team_shuffle"`
+	PingLimit        bool   `db:"ping_limit" json:"ping_limit"`
+}
+
+type MRule struct {
+	ID           string `db:"id" json:"id"`
+	Difficulty   int    `db:"difficulty" json:"difficulty"`
+	DamageLevel  int    `db:"damage_level" json:"damage_level"`
+	Timer        int    `db:"timer" json:"timer"`
+	TeamFlag     int    `db:"team_flag" json:"team_flag"`
+	StageFlag    int    `db:"stage_flag" json:"stage_flag"`
+	MsFlag       int    `db:"ms_flag" json:"ms_flag"`
+	RenpoVital   int    `db:"renpo_vital" json:"renpo_vital"`
+	ZeonVital    int    `db:"zeon_vital" json:"zeon_vital"`
+	MaFlag       int    `db:"ma_flag" json:"ma_flag"`
+	ReloadFlag   int    `db:"reload_flag" json:"reload_flag"`
+	BoostKeep    int    `db:"boost_keep" json:"boost_keep"`
+	RedarFlag    int    `db:"redar_flag" json:"redar_flag"`
+	LockonFlag   int    `db:"lockon_flag" json:"lockon_flag"`
+	Onematch     int    `db:"onematch" json:"onematch"`
+	RenpoMaskPS2 int    `db:"renpo_mask_ps2" json:"renpo_mask_ps2"`
+	ZeonMaskPS2  int    `db:"zeon_mask_ps2" json:"zeon_mask_ps2"`
+	AutoRebattle int    `db:"auto_rebattle" json:"auto_rebattle"`
+	NoRanking    int    `db:"no_ranking" json:"no_ranking"`
+	CPUFlag      int    `db:"cpu_flag" json:"cpu_flag"`
+	SelectLook   int    `db:"select_look" json:"select_look"`
+	RenpoMaskDC  uint   `db:"renpo_mask_dc" json:"renpo_mask_dc"`
+	ZeonMaskDC   uint   `db:"zeon_mask_dc" json:"zeon_mask_dc"`
+	StageNo      int    `db:"stage_no" json:"stage_no"`
+}
+
 // DB is an interface of database operation.
 type DB interface {
 	// Init initializes the database.
@@ -133,7 +176,7 @@ type DB interface {
 	GetAccountBySessionID(sessionID string) (*DBAccount, error)
 
 	// LoginAccount updates last login information and update sessionID.
-	LoginAccount(account *DBAccount, sessionID string, ipAddr string) error
+	LoginAccount(account *DBAccount, sessionID string, ipAddr string, machineID string) error
 
 	// RegisterUser creates new user.
 	// An account can hold three userPeers.
@@ -162,18 +205,30 @@ type DB interface {
 	UpdateBattleRecord(record *BattleRecord) error
 
 	// CalculateUserTotalBattleCount calculates battle count of the user.
-	// You can get the results of one army using the `side` parameter.
-	CalculateUserTotalBattleCount(userID string, side byte) (ret BattleCountResult, err error)
+	// You can get the results of one army using the `team` parameter.
+	CalculateUserTotalBattleCount(userID string, team byte) (ret BattleCountResult, err error)
 
 	// CalculateUserDailyBattleCount calculates daily battle count of the user.
 	CalculateUserDailyBattleCount(userID string) (ret BattleCountResult, err error)
 
 	// GetWinCountRanking returns top userPeers of win count.
-	GetWinCountRanking(side byte) (ret []*RankingRecord, err error)
+	GetWinCountRanking(team byte) (ret []*RankingRecord, err error)
 
-	// GetWinCountRanking returns top userPeers of kill count.
-	GetKillCountRanking(side byte) (ret []*RankingRecord, err error)
+	// GetKillCountRanking returns top userPeers of kill count.
+	GetKillCountRanking(team byte) (ret []*RankingRecord, err error)
 
 	// GetString returns a string that corresponds to the key.
 	GetString(key string) (value string, err error)
+
+	// IsBannedEndpoint returns true if the endpoint is banned.
+	IsBannedEndpoint(ip, machineID string) (banned bool, err error)
+
+	// IsBannedAccount returns true if the account is banned.
+	IsBannedAccount(account string) (banned bool, err error)
+
+	// GetLobbySetting returns lobby setting.
+	GetLobbySetting(platform, disk string, no int) (*MLobbySetting, error)
+
+	// GetRule returns game rule.
+	GetRule(id string) (*MRule, error)
 }
